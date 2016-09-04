@@ -132,12 +132,12 @@ class GeoTrackingService extends SService with Logger
   override def onLocationChanged(location: Location): Unit = {
     info(s"got new location with accuracy: ${location.getAccuracy} ")
     locations += api.Location(
-      lat = location.getLatitude,
-      lon = location.getLongitude,
-      alt = location.getAltitude,
-      ts = System.currentTimeMillis(),
-      hacc = location.getAccuracy,
-      vacc = location.getAccuracy,
+      latitude = location.getLatitude,
+      longitude = location.getLongitude,
+      altitude = Some(location.getAltitude),
+      timestamp = System.currentTimeMillis(),
+      horizontalAccuracy = location.getAccuracy,
+      verticalAccuracy = None,
       speed = location.getSpeed
     )
     if(locations.length == MinLocationsToSend) {
