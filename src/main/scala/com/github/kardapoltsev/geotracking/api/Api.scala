@@ -12,12 +12,14 @@ import spray.json._
 
 object Api {
   private lazy val client = new AsyncHttpClient()
+  private val ApiUrl = ""
+  private val SendLocationUrl = ApiUrl + "geo/location"
 
   def sendLocation(locations: Seq[Location])(implicit ctx: Context): Unit = {
     if(locations.nonEmpty) {
-      Log.d("API", s"sending ${locations.toJson.prettyPrint}")
-      val entity = new StringEntity("json here")
-      //client.post(ctx, "", entity, "application/json", sendLocationResponseHandler)
+      //Log.d("API", s"sending ${locations.toJson.prettyPrint}")
+      val entity = new StringEntity(locations.toJson.compactPrint)
+      client.post(ctx, SendLocationUrl, entity, "application/json", sendLocationResponseHandler)
     }
   }
 
@@ -28,7 +30,7 @@ object Api {
         headers: Array[Header],
         responseBody: Array[Byte],
         error: Throwable): Unit = {
-
+        Log.e("API", "couldn't send location. response status: " + statusCode, error)
       }
 
       override def onSuccess(
@@ -36,7 +38,7 @@ object Api {
         headers: Array[Header],
         responseBody: Array[Byte]
       ): Unit = {
-
+        Log.i("API", "locations were sent")
       }
     }
 

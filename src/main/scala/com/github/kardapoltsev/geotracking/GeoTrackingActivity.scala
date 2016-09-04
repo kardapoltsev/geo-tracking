@@ -11,7 +11,8 @@ class GeoTrackingActivity extends SActivity {
   private val PermissionRequestCode = 31528
 
   onCreate {
-    setContentView(R.layout.main)
+    drawMainScreen()
+
     val requiredPermission = android.Manifest.permission.ACCESS_FINE_LOCATION
     val permissionCheckResult = ContextCompat.checkSelfPermission(
       this, requiredPermission
@@ -30,8 +31,25 @@ class GeoTrackingActivity extends SActivity {
           PermissionRequestCode)
       }
     } else {
-      startService[GeoTrackingService]
+      startTracking()
     }
+  }
+
+  private def drawMainScreen(): Unit = {
+    val l = new SVerticalLayout {
+      STextView("Geo tracking")
+      SButton("start tracking", startTracking())
+      SButton("stop tracking", stopTracking())
+    }
+    setContentView(l)
+  }
+
+  private def startTracking(): Unit = {
+    startService[GeoTrackingService]
+  }
+
+  private def stopTracking(): Unit = {
+    stopService[GeoTrackingService]
   }
 
   override def onRequestPermissionsResult(
@@ -42,7 +60,7 @@ class GeoTrackingActivity extends SActivity {
         // If request is cancelled, the result arrays are empty.
         if (grantResults.length > 0 && grantResults(0) == PackageManager.PERMISSION_GRANTED) {
           info("permissions granted, starting geo tracking service")
-          startService[GeoTrackingService]
+          startTracking()
         } else {
           warn("permission denied, stopping...")
           finish()
