@@ -9,6 +9,8 @@ import android.util.Log
 import okhttp3._
 import spray.json._
 
+import scala.concurrent.{Future, Promise}
+
 
 
 object Api {
@@ -17,27 +19,31 @@ object Api {
   private val SendLocationUrl = ApiUrl + "geo/location"
   val jsonMediaType = MediaType.parse("application/json; charset=utf-8")
 
-  def sendLocation(locations: Seq[Location])(implicit ctx: Context): Unit = {
-    if(locations.nonEmpty) {
-      //Log.d("API", s"sending ${locations.toJson.prettyPrint}")
-      val body = RequestBody.create(jsonMediaType, gzip(locations))
-      val request = new Request.Builder().
-        url(SendLocationUrl).
-        header("Content-Encoding", "gzip").
-        post(body).
-        build()
+  def sendLocation(locations: Seq[Location])(implicit ctx: Context): Future[String] = {
+    //Log.d("API", s"sending ${locations.toJson.prettyPrint}")
+    val body = RequestBody.create(jsonMediaType, gzip(locations))
+    val request = new Request.Builder().
+      url(SendLocationUrl).
+      header("Content-Encoding", "gzip").
+      post(body).
+      build()
 
-      client.newCall(request).enqueue(new Callback(){
-        override def onFailure(call: Call, e: IOException): Unit = {
-          Log.e("API", "couldn't send location", e)
-        }
+    val p = Promise[String]
+    client.newCall(request).enqueue(new Callback(){
+      override def onFailure(call: Call, e: IOException): Unit = {
+        Log.e("API", "couldn't send location", e)
+        p.failure(e)
+      }
 
-        override def onResponse(call: Call, response: Response): Unit = {
-          Log.i("API", s"locations were sent: $response")
-        }
-      })
-    }
+      override def onResponse(call: Call, response: Response): Unit = {
+        Log.i("API", s"locations were sent: $response")
+        //string() should close the body
+        p.success(response.body().string())
+      }
+    })
+    p.future
   }
+
 
   private def gzip(locations: Seq[Location]): Array[Byte] = {
     val data = locations.toJson.compactPrint.getBytes("UTF-8")

@@ -1,33 +1,43 @@
 package com.github.kardapoltsev.geotracking
 
 
-import android.app.Service
-import android.content.{Context, Intent}
+import android.content.{ContentValues, Context, Intent}
 import android.hardware._
 import android.location.{Criteria, Location, LocationListener, LocationManager}
-import android.os.{Bundle, Handler, IBinder}
+import android.os.{AsyncTask, Bundle, IBinder}
 import com.github.kardapoltsev.geotracking.api.Api
-import org.scaloid.common.{Logger, SService}
+import com.github.kardapoltsev.geotracking.db.LocationDbHelper
+import com.github.kardapoltsev.geotracking.db.LocationEntry
+import org.scaloid.common.{DatabaseImplicits, Logger, SService}
+import spray.json._
+import org.scaloid.common._
 
 import scala.collection.mutable
+import scala.concurrent.ExecutionContext
 
 
 
-class GeoTrackingService extends SService with Logger
+class GeoTrackingService extends SService with DatabaseImplicits with Logger
   with LocationListener {
   val MinInterval = 0L
-  val MinDistance = 10F
-  val MinLocationsToSend = 20
+  val MinDistance = 5F
+  val MinLocationsToSend = 100
+  val MaxLocationsToSend = 500
+
+  implicit val ec = ExecutionContext.fromExecutor(
+    AsyncTask.THREAD_POOL_EXECUTOR
+  )
+
+  private val dbHelper = new LocationDbHelper
 
   private val locations = mutable.ListBuffer[api.Location]()
 
   private var locationManager: LocationManager = _
   private var sensorManager: SensorManager = _
 
-  private var handler: Handler = _
   private var lastLocationUpdateTime = -1L
-  private val CheckMotionInterval = 60 * 2 * 1000
-  private val NoMotionInterval = 60 * 1000
+  private val NoMotionInterval = 5 * 60 * 1000
+  private val CheckMotionInterval = 60 * 1000
 
 
   override def onBind(intent: Intent): IBinder = {
@@ -37,10 +47,10 @@ class GeoTrackingService extends SService with Logger
 
   onCreate {
     info(s"starting geo tracking service. MinDistance = $MinDistance m, MinLocationsToSend = $MinLocationsToSend")
-    handler = new Handler
     locationManager = getSystemService(Context.LOCATION_SERVICE).asInstanceOf[LocationManager]
     sensorManager = getSystemService(Context.SENSOR_SERVICE).asInstanceOf[SensorManager]
     registerForGpsUpdates()
+    sendUnsentLocations()
   }
 
   onDestroy {
@@ -116,10 +126,75 @@ class GeoTrackingService extends SService with Logger
 
   private def sendLocations(): Unit = {
     info(s"sending ${locations.length} locations")
-    Api.sendLocation(locations.toList)
+    val l = locations.toList
+    Api.sendLocation(l) onFailure {
+      case e =>
+        val db = dbHelper.getWritableDatabase
+        db.beginTransaction()
+        try {
+          l.foreach { unsent =>
+            val value = new ContentValues(1)
+            value.put(LocationEntry.LocationColumnName, unsent.toJson.compactPrint)
+
+            dbHelper.getWritableDatabase.insertOrThrow(
+              LocationEntry.TableName,
+              null,
+              value
+            )
+          }
+          info(s"saved ${l.size} unsent locations")
+          db.setTransactionSuccessful()
+        } catch {
+          case e: Exception =>
+            error("couldn't insert unsent locations", e)
+        } finally {
+          db.endTransaction()
+        }
+
+    }
     locations.clear()
   }
 
+  private def sendUnsentLocations(): Unit = {
+    val projection = Array(LocationEntry._ID, LocationEntry.LocationColumnName)
+    val unsent = dbHelper.getReadableDatabase.query(
+      LocationEntry.TableName,
+      projection,
+      null, //selection
+      null, //selection args
+      null, //group
+      null, //filter
+      null,  //order
+      MaxLocationsToSend.toString // limit
+    ).closeAfter(_.map { c =>
+      val id = c.getInt(c.getColumnIndexOrThrow(LocationEntry._ID))
+      val l = c.getString(
+        c.getColumnIndexOrThrow(LocationEntry.LocationColumnName)
+      ).parseJson.convertTo[api.Location]
+
+      LocationEntry(id, l)
+    })
+
+    if(unsent.nonEmpty) {
+      Api.sendLocation(unsent.map(_.location).toSeq) onSuccess { case response =>
+        runOnUiThread {
+          val inClause = unsent.map(_ => "?").
+            mkString(LocationEntry._ID + " in (", ",", ")")
+
+          info(s"${unsent.size} unsent locations were sent")
+          dbHelper.getWritableDatabase.delete(
+            LocationEntry.TableName,
+            inClause,
+            unsent.map(_.id.toString).toArray
+          )
+          if (unsent.size == MaxLocationsToSend) {
+            //we have more unsent in database
+            sendUnsentLocations()
+          }
+        }
+      }
+    }
+  }
 
   //
   // Location listener interface
