@@ -4,6 +4,7 @@ package com.github.kardapoltsev.geotracking
 import android.content.{ContentValues, Context, Intent}
 import android.hardware._
 import android.location.{Criteria, Location, LocationListener, LocationManager}
+import android.net.ConnectivityManager
 import android.os.{AsyncTask, Bundle, IBinder}
 import com.github.kardapoltsev.geotracking.api.Api
 import com.github.kardapoltsev.geotracking.db.LocationDbHelper
@@ -28,12 +29,13 @@ class GeoTrackingService extends SService with DatabaseImplicits with Logger
     AsyncTask.THREAD_POOL_EXECUTOR
   )
 
-  private val dbHelper = new LocationDbHelper
+  private lazy val database = new LocationDbHelper().getWritableDatabase
 
   private val locations = mutable.ListBuffer[api.Location]()
 
   private var locationManager: LocationManager = _
   private var sensorManager: SensorManager = _
+  private var connectivityManager: ConnectivityManager = _
 
   private var lastLocationUpdateTime = -1L
   private val NoMotionInterval = 5 * 60 * 1000
@@ -49,6 +51,7 @@ class GeoTrackingService extends SService with DatabaseImplicits with Logger
     info(s"starting geo tracking service. MinDistance = $MinDistance m, MinLocationsToSend = $MinLocationsToSend")
     locationManager = getSystemService(Context.LOCATION_SERVICE).asInstanceOf[LocationManager]
     sensorManager = getSystemService(Context.SENSOR_SERVICE).asInstanceOf[SensorManager]
+    connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE).asInstanceOf[ConnectivityManager]
     registerForGpsUpdates()
     sendUnsentLocations()
   }
@@ -57,7 +60,12 @@ class GeoTrackingService extends SService with DatabaseImplicits with Logger
     info(s"stopping geo tracking service")
     stopMotionChecker()
     unregisterFromGpsUpdates()
+    database.close()
   }
+
+  //
+  // Motion detection
+  //
 
   private def startMotionChecker(): Unit = {
     lastLocationUpdateTime = -1
@@ -100,7 +108,6 @@ class GeoTrackingService extends SService with DatabaseImplicits with Logger
     sensorManager.requestTriggerSensor(listener, sensor)
   }
 
-
   private def registerForGpsUpdates(): Unit = {
     info("registering for gps updates")
     val locationManager = getSystemService(Context.LOCATION_SERVICE).asInstanceOf[LocationManager]
@@ -121,43 +128,62 @@ class GeoTrackingService extends SService with DatabaseImplicits with Logger
   private def unregisterFromGpsUpdates(): Unit = {
     stopMotionChecker()
     locationManager.removeUpdates(this)
-    sendLocations() //ensure that last locations were sent
+    flushLocationsBatch() //ensure that last locations were sent
   }
 
-  private def sendLocations(): Unit = {
+  //
+  // Send locations stuff
+  //
+
+  private def flushLocationsBatch(): Unit = {
+    val batch = locations.toList
+    locations.clear()
+    if(isWifi) {
+      info(s"Wifi enabled, sending locations")
+      sendLocations(batch)
+      sendUnsentLocations()
+    } else {
+      info("wifi disabled, storing locations")
+      storeLocations(batch)
+    }
+  }
+
+  private def sendLocations(locations: Seq[api.Location]): Unit = {
     info(s"sending ${locations.length} locations")
     val l = locations.toList
     Api.sendLocation(l) onFailure {
       case e =>
-        val db = dbHelper.getWritableDatabase
-        db.beginTransaction()
-        try {
-          l.foreach { unsent =>
-            val value = new ContentValues(1)
-            value.put(LocationEntry.LocationColumnName, unsent.toJson.compactPrint)
-
-            dbHelper.getWritableDatabase.insertOrThrow(
-              LocationEntry.TableName,
-              null,
-              value
-            )
-          }
-          info(s"saved ${l.size} unsent locations")
-          db.setTransactionSuccessful()
-        } catch {
-          case e: Exception =>
-            error("couldn't insert unsent locations", e)
-        } finally {
-          db.endTransaction()
-        }
-
+        storeLocations(l)
     }
-    locations.clear()
+  }
+
+  private def storeLocations(locations: Seq[api.Location]): Unit = {
+    database.beginTransaction()
+    try {
+      locations.foreach { unsent =>
+        val value = new ContentValues(1)
+        value.put(LocationEntry.LocationColumnName, unsent.toJson.compactPrint)
+
+        database.insertOrThrow(
+          LocationEntry.TableName,
+          null,
+          value
+        )
+      }
+      info(s"saved ${locations.size} locations")
+      database.setTransactionSuccessful()
+    } catch {
+      case e: Exception =>
+        error("couldn't insert locations", e)
+    } finally {
+      database.endTransaction()
+    }
+
   }
 
   private def sendUnsentLocations(): Unit = {
     val projection = Array(LocationEntry._ID, LocationEntry.LocationColumnName)
-    val unsent = dbHelper.getReadableDatabase.query(
+    val unsent = database.query(
       LocationEntry.TableName,
       projection,
       null, //selection
@@ -182,7 +208,7 @@ class GeoTrackingService extends SService with DatabaseImplicits with Logger
             mkString(LocationEntry._ID + " in (", ",", ")")
 
           info(s"${unsent.size} unsent locations were sent")
-          dbHelper.getWritableDatabase.delete(
+          database.delete(
             LocationEntry.TableName,
             inClause,
             unsent.map(_.id.toString).toArray
@@ -193,6 +219,13 @@ class GeoTrackingService extends SService with DatabaseImplicits with Logger
           }
         }
       }
+    }
+  }
+
+  private def isWifi: Boolean = {
+    val info = connectivityManager.getActiveNetworkInfo
+    Option(info).fold(false) { i =>
+      i.isConnectedOrConnecting && i.getType == ConnectivityManager.TYPE_WIFI
     }
   }
 
@@ -216,7 +249,7 @@ class GeoTrackingService extends SService with DatabaseImplicits with Logger
       speed = location.getSpeed
     )
     if(locations.length == MinLocationsToSend) {
-      sendLocations()
+      flushLocationsBatch()
     }
     lastLocationUpdateTime = System.currentTimeMillis()
   }

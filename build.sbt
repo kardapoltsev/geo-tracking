@@ -10,6 +10,7 @@ scalacOptions in Compile += "-feature"
 proguardCache in Android ++= Seq("org.scaloid")
 
 proguardOptions in Android ++= Seq(
+  "-keep class com.github.kardapoltsev.**",
   "-dontobfuscate",
   "-dontoptimize",
   "-keepattributes Signature",
