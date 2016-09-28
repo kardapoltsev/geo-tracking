@@ -21,9 +21,9 @@ import scala.concurrent.ExecutionContext
 class GeoTrackingService extends SService with DatabaseImplicits with Logger
   with LocationListener {
   val MinInterval = 0L
-  val MinDistance = 5F
+  val MinDistance = 3F
   val MinLocationsToSend = 100
-  val MaxLocationsToSend = 500
+  val MaxLocationsToSend = 1000
 
   implicit val ec = ExecutionContext.fromExecutor(
     AsyncTask.THREAD_POOL_EXECUTOR
@@ -137,24 +137,8 @@ class GeoTrackingService extends SService with DatabaseImplicits with Logger
 
   private def flushLocationsBatch(): Unit = {
     val batch = locations.toList
-    locations.clear()
-    if(isWifi) {
-      info(s"Wifi enabled, sending locations")
-      sendLocations(batch)
-      sendUnsentLocations()
-    } else {
-      info("wifi disabled, storing locations")
-      storeLocations(batch)
-    }
-  }
-
-  private def sendLocations(locations: Seq[api.Location]): Unit = {
-    info(s"sending ${locations.length} locations")
-    val l = locations.toList
-    Api.sendLocation(l) onFailure {
-      case e =>
-        storeLocations(l)
-    }
+    storeLocations(batch)
+    sendUnsentLocations()
   }
 
   private def storeLocations(locations: Seq[api.Location]): Unit = {
@@ -182,40 +166,42 @@ class GeoTrackingService extends SService with DatabaseImplicits with Logger
   }
 
   private def sendUnsentLocations(): Unit = {
-    val projection = Array(LocationEntry._ID, LocationEntry.LocationColumnName)
-    val unsent = database.query(
-      LocationEntry.TableName,
-      projection,
-      null, //selection
-      null, //selection args
-      null, //group
-      null, //filter
-      null,  //order
-      MaxLocationsToSend.toString // limit
-    ).closeAfter(_.map { c =>
-      val id = c.getInt(c.getColumnIndexOrThrow(LocationEntry._ID))
-      val l = c.getString(
-        c.getColumnIndexOrThrow(LocationEntry.LocationColumnName)
-      ).parseJson.convertTo[api.Location]
+    if(isWifi) {
+      val projection = Array(LocationEntry._ID, LocationEntry.LocationColumnName)
+      val unsent = database.query(
+        LocationEntry.TableName,
+        projection,
+        null, //selection
+        null, //selection args
+        null, //group
+        null, //filter
+        null,  //order
+        MaxLocationsToSend.toString // limit
+      ).closeAfter(_.map { c =>
+        val id = c.getInt(c.getColumnIndexOrThrow(LocationEntry._ID))
+        val l = c.getString(
+          c.getColumnIndexOrThrow(LocationEntry.LocationColumnName)
+        ).parseJson.convertTo[api.Location]
 
-      LocationEntry(id, l)
-    })
+        LocationEntry(id, l)
+      })
 
-    if(unsent.nonEmpty) {
-      Api.sendLocation(unsent.map(_.location).toSeq) onSuccess { case response =>
-        runOnUiThread {
-          val inClause = unsent.map(_ => "?").
-            mkString(LocationEntry._ID + " in (", ",", ")")
+      if(unsent.nonEmpty) {
+        Api.sendLocation(unsent.map(_.location).toSeq) onSuccess { case response =>
+          runOnUiThread {
+            val inClause = unsent.map(_ => "?").
+              mkString(LocationEntry._ID + " in (", ",", ")")
 
-          info(s"${unsent.size} unsent locations were sent")
-          database.delete(
-            LocationEntry.TableName,
-            inClause,
-            unsent.map(_.id.toString).toArray
-          )
-          if (unsent.size == MaxLocationsToSend) {
-            //we have more unsent in database
-            sendUnsentLocations()
+            info(s"${unsent.size} unsent locations were sent")
+            database.delete(
+              LocationEntry.TableName,
+              inClause,
+              unsent.map(_.id.toString).toArray
+            )
+            if (unsent.size == MaxLocationsToSend) {
+              //we have more unsent in database
+              sendUnsentLocations()
+            }
           }
         }
       }
@@ -225,7 +211,7 @@ class GeoTrackingService extends SService with DatabaseImplicits with Logger
   private def isWifi: Boolean = {
     val info = connectivityManager.getActiveNetworkInfo
     Option(info).fold(false) { i =>
-      i.isConnectedOrConnecting && i.getType == ConnectivityManager.TYPE_WIFI
+      i.isConnected && i.getType == ConnectivityManager.TYPE_WIFI
     }
   }
 
@@ -238,7 +224,7 @@ class GeoTrackingService extends SService with DatabaseImplicits with Logger
   override def onProviderDisabled(provider: String): Unit = { }
 
   override def onLocationChanged(location: Location): Unit = {
-    info(s"got new location with accuracy: ${location.getAccuracy} ")
+    //debug(s"got new location with accuracy: ${location.getAccuracy} ")
     locations += api.Location(
       latitude = location.getLatitude,
       longitude = location.getLongitude,

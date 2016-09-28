@@ -28,7 +28,8 @@ class GeoTrackingActivity extends SActivity {
         ActivityCompat.requestPermissions(
           this,
           Array[String](requiredPermission),
-          PermissionRequestCode)
+          PermissionRequestCode
+        )
       }
     } else {
       startTracking()
