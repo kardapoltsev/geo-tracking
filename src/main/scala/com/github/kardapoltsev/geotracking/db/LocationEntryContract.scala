@@ -3,10 +3,11 @@ package com.github.kardapoltsev.geotracking.db
 import android.content.Context
 import android.database.sqlite.{SQLiteDatabase, SQLiteOpenHelper}
 import com.github.kardapoltsev.geotracking.api.Location
-import org.scaloid.Workarounds.BaseColumns
 
 
-object LocationEntry extends BaseColumns {
+//org.scaloid.Workarounds doesn't work :(
+//TODO: fix column names
+object LocationEntry {
   val TableName = "locations"
   val LocationColumnName =  "location"
   val _ID = "_id"

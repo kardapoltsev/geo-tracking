@@ -23,13 +23,16 @@ class GeoTrackingService extends SService with DatabaseImplicits with Logger
   val MinInterval = 0L
   val MinDistance = 3F
   val MinLocationsToSend = 100
-  val MaxLocationsToSend = 1000
+  //setting this to 1000 results in
+  //android.database.sqlite.SQLiteException: too many SQL variables (code 1): , while compiling: DELETE FROM locations WHERE _id in (?,?,?,?,?,? ... )
+  val MaxLocationsToSend = 500
 
   implicit val ec = ExecutionContext.fromExecutor(
     AsyncTask.THREAD_POOL_EXECUTOR
   )
 
-  private lazy val database = new LocationDbHelper().getWritableDatabase
+  private lazy val dbHelper = new LocationDbHelper()
+  private lazy val database = dbHelper.getWritableDatabase
 
   private val locations = mutable.ListBuffer[api.Location]()
 
@@ -60,7 +63,7 @@ class GeoTrackingService extends SService with DatabaseImplicits with Logger
     info(s"stopping geo tracking service")
     stopMotionChecker()
     unregisterFromGpsUpdates()
-    database.close()
+    dbHelper.close()
   }
 
   //
@@ -137,6 +140,7 @@ class GeoTrackingService extends SService with DatabaseImplicits with Logger
 
   private def flushLocationsBatch(): Unit = {
     val batch = locations.toList
+    locations.clear()
     storeLocations(batch)
     sendUnsentLocations()
   }
@@ -189,18 +193,20 @@ class GeoTrackingService extends SService with DatabaseImplicits with Logger
       if(unsent.nonEmpty) {
         Api.sendLocation(unsent.map(_.location).toSeq) onSuccess { case response =>
           runOnUiThread {
-            val inClause = unsent.map(_ => "?").
-              mkString(LocationEntry._ID + " in (", ",", ")")
+            if(database.isOpen) { //service could be already stopped
+              val inClause = unsent.map(_ => "?").
+                mkString(LocationEntry._ID + " in (", ",", ")")
 
-            info(s"${unsent.size} unsent locations were sent")
-            database.delete(
-              LocationEntry.TableName,
-              inClause,
-              unsent.map(_.id.toString).toArray
-            )
-            if (unsent.size == MaxLocationsToSend) {
-              //we have more unsent in database
-              sendUnsentLocations()
+              info(s"${unsent.size} unsent locations were sent")
+              database.delete(
+                LocationEntry.TableName,
+                inClause,
+                unsent.map(_.id.toString).toArray
+              )
+              if (unsent.size == MaxLocationsToSend) {
+                //we have more unsent in database
+                sendUnsentLocations()
+              }
             }
           }
         }
