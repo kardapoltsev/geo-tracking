@@ -14,10 +14,24 @@ import scala.concurrent.{Future, Promise}
 
 
 object Api {
-  private lazy val client = new OkHttpClient()
-  private val ApiUrl = ""
+  private lazy val client = new OkHttpClient.Builder().authenticator(
+    new Authenticator {
+      override def authenticate(route: Route, response: Response): Request = {
+        response.request().newBuilder().header(
+          "Authorization", credentials
+        ).build()
+      }
+    }
+  ).build()
+
+  import java.io.IOException
+
+  private val Login = ""
+  private val Password = ""
+  private val ApiUrl = "http://"
   private val SendLocationUrl = ApiUrl + "geo/location"
   val jsonMediaType = MediaType.parse("application/json; charset=utf-8")
+  val credentials = Credentials.basic(Login, Password)
 
   def sendLocation(locations: Seq[Location])(implicit ctx: Context): Future[String] = {
     //Log.d("API", s"sending ${locations.toJson.prettyPrint}")
@@ -38,7 +52,11 @@ object Api {
       override def onResponse(call: Call, response: Response): Unit = {
         Log.i("API", s"locations were sent: $response")
         //string() should close the body
-        p.success(response.body().string())
+        if(response.isSuccessful) {
+          p.success(response.body().string())
+        } else {
+          p.failure(new Exception("couldn't save locations: " + response))
+        }
       }
     })
     p.future

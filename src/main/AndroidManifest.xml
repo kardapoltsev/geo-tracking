@@ -17,8 +17,7 @@
       android:theme="@android:style/Theme.Holo.Light"
   >
 
-  <service android:name="GeoTrackingService"
-  />
+    <service android:name="GeoTrackingService" />
 
     <activity android:name="GeoTrackingActivity"
               android:label="@string/app_name">

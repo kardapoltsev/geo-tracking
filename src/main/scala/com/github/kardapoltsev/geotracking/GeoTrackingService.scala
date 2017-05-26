@@ -20,12 +20,14 @@ import scala.concurrent.ExecutionContext
 
 class GeoTrackingService extends SService with DatabaseImplicits with Logger
   with LocationListener {
-  val MinInterval = 0L
-  val MinDistance = 3F
-  val MinLocationsToSend = 100
+  private val MinInterval = 0L
+  private val MinDistance = 0F
+  private val MinLocationsToSend = 100
   //setting this to 1000 results in
   //android.database.sqlite.SQLiteException: too many SQL variables (code 1): , while compiling: DELETE FROM locations WHERE _id in (?,?,?,?,?,? ... )
-  val MaxLocationsToSend = 500
+  private val MaxLocationsToSend = 500
+  private val IsSignificantMotionDetectionAllowed = false
+  private val WifiOnly = false
 
   implicit val ec = ExecutionContext.fromExecutor(
     AsyncTask.THREAD_POOL_EXECUTOR
@@ -88,11 +90,13 @@ class GeoTrackingService extends SService with DatabaseImplicits with Logger
   private def checkMotion(): Unit = {
     info(s"checking device motion using lastLocationUpdateTime")
     if(lastLocationUpdateTime > 0
-      && System.currentTimeMillis() - lastLocationUpdateTime > NoMotionInterval) {
+      && System.currentTimeMillis() - lastLocationUpdateTime > NoMotionInterval
+      && IsSignificantMotionDetectionAllowed
+    ) {
       info("device is stopped")
       unregisterFromGpsUpdates()
       registerForMotionDetection()
-    } else {
+    } else if(IsSignificantMotionDetectionAllowed) {
       info("device is moving")
       handler.postDelayed(motionChecker, CheckMotionInterval)
     }
@@ -170,7 +174,7 @@ class GeoTrackingService extends SService with DatabaseImplicits with Logger
   }
 
   private def sendUnsentLocations(): Unit = {
-    if(isWifi) {
+    if(!WifiOnly || isWifi) {
       val projection = Array(LocationEntry._ID, LocationEntry.LocationColumnName)
       val unsent = database.query(
         LocationEntry.TableName,
@@ -245,6 +249,5 @@ class GeoTrackingService extends SService with DatabaseImplicits with Logger
     }
     lastLocationUpdateTime = System.currentTimeMillis()
   }
-
 
 }
