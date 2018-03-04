@@ -9,7 +9,7 @@ import android.os.{AsyncTask, Bundle, IBinder}
 import com.github.kardapoltsev.geotracking.api.Api
 import com.github.kardapoltsev.geotracking.db.LocationDbHelper
 import com.github.kardapoltsev.geotracking.db.LocationEntry
-import org.scaloid.common.{DatabaseImplicits, Logger, SService}
+import org.scaloid.common.{DatabaseImplicits, SService}
 import spray.json._
 import org.scaloid.common._
 
@@ -18,7 +18,7 @@ import scala.concurrent.ExecutionContext
 
 
 
-class GeoTrackingService extends SService with DatabaseImplicits with Logger
+class GeoTrackingService extends SService with DatabaseImplicits
   with LocationListener {
   private val MinInterval = 0L
   private val MinDistance = 0F
