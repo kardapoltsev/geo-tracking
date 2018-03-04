@@ -1,3 +1,3 @@
-addSbtPlugin("org.scala-android" % "sbt-android" % "1.6.16")
+addSbtPlugin("org.scala-android" % "sbt-android" % "1.7.10")
 
-libraryDependencies += "net.sf.proguard" % "proguard-base" % "5.2.1"
+libraryDependencies += "net.sf.proguard" % "proguard-base" % "5.3.3"

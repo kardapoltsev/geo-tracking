@@ -234,17 +234,17 @@ class GeoTrackingService extends SService with DatabaseImplicits with Logger
   override def onProviderDisabled(provider: String): Unit = { }
 
   override def onLocationChanged(location: Location): Unit = {
-    //debug(s"got new location with accuracy: ${location.getAccuracy} ")
+    debug(s"got new location with accuracy: ${location.getAccuracy} ")
     locations += api.Location(
       latitude = location.getLatitude,
       longitude = location.getLongitude,
       altitude = Some(location.getAltitude),
-      timestamp = System.currentTimeMillis(),
+      timestamp = location.getTime,
       horizontalAccuracy = location.getAccuracy,
       verticalAccuracy = None,
       speed = location.getSpeed
     )
-    if(locations.length == MinLocationsToSend) {
+    if(locations.lengthCompare(MinLocationsToSend) == 0) {
       flushLocationsBatch()
     }
     lastLocationUpdateTime = System.currentTimeMillis()
