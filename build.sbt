@@ -2,10 +2,11 @@ name := "geo-tracking"
 
 //import android.Keys._
 //android.Plugin.androidBuild
+//adb shell; settings put global location_background_throttle_package_whitelist "com.github.kardapoltsev.geotracking"
 enablePlugins(AndroidApp)
 
 javacOptions ++= Seq("-source", "1.7", "-target", "1.7")
-scalaVersion := "2.11.8"
+scalaVersion := "2.11.12"
 scalacOptions in Compile += "-feature"
 
 proguardCache in Android ++= Seq("org.scaloid")
@@ -32,7 +33,7 @@ proguardOptions in Android ++= Seq(
 libraryDependencies ++= Seq(
   "org.scaloid"          %% "scaloid"            % "4.2",
   "com.android.support"  %  "support-core-utils" % "24.2.0",
-  "com.squareup.okhttp3" %  "okhttp"             % "3.10.0",
+  "com.squareup.okhttp3" %  "okhttp"             % "3.11.0",
   "io.spray"             %% "spray-json"         % "1.3.4"
 )
 
