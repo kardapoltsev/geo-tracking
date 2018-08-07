@@ -1,11 +1,13 @@
 package com.github.kardapoltsev.geotracking
 
-
+import android.app.{Notification, NotificationChannel, NotificationManager, PendingIntent}
 import android.content.{ContentValues, Context, Intent}
+import android.graphics.Color
 import android.hardware._
 import android.location.{Criteria, Location, LocationListener, LocationManager}
 import android.net.ConnectivityManager
 import android.os.{AsyncTask, Bundle, IBinder}
+import android.support.v4.app.NotificationCompat
 import com.github.kardapoltsev.geotracking.api.Api
 import com.github.kardapoltsev.geotracking.db.LocationDbHelper
 import com.github.kardapoltsev.geotracking.db.LocationEntry
@@ -16,10 +18,10 @@ import org.scaloid.common._
 import scala.collection.mutable
 import scala.concurrent.ExecutionContext
 
-
-
-class GeoTrackingService extends SService with DatabaseImplicits
-  with LocationListener {
+class GeoTrackingService
+    extends SService
+    with DatabaseImplicits
+    with LocationListener {
   private val MinInterval = 0L
   private val MinDistance = 0F
   private val MinLocationsToSend = 100
@@ -46,20 +48,43 @@ class GeoTrackingService extends SService with DatabaseImplicits
   private val NoMotionInterval = 5 * 60 * 1000
   private val CheckMotionInterval = 60 * 1000
 
-
   override def onBind(intent: Intent): IBinder = {
     //don't provide binding
     null
   }
 
   onCreate {
-    info(s"starting geo tracking service. MinDistance = $MinDistance m, MinLocationsToSend = $MinLocationsToSend")
-    locationManager = getSystemService(Context.LOCATION_SERVICE).asInstanceOf[LocationManager]
-    sensorManager = getSystemService(Context.SENSOR_SERVICE).asInstanceOf[SensorManager]
-    connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE).asInstanceOf[ConnectivityManager]
+    info(
+      s"starting geo tracking service. MinDistance = $MinDistance m, MinLocationsToSend = $MinLocationsToSend")
+    locationManager =
+      getSystemService(Context.LOCATION_SERVICE).asInstanceOf[LocationManager]
+    sensorManager =
+      getSystemService(Context.SENSOR_SERVICE).asInstanceOf[SensorManager]
+    connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE)
+      .asInstanceOf[ConnectivityManager]
     registerForGpsUpdates()
     sendUnsentLocations()
+    val channelId = createNotificationChannel
+    val i = SIntent[GeoTrackingActivity]
+    val pi = PendingIntent.getActivity(this, 0, i, 0)
+    val n = new NotificationCompat.Builder(this,  channelId)
+      .setContentTitle("GeoTracking")
+      .setSmallIcon(R.drawable.notification_icon_background)
+      .setContentIntent(pi)
+      .setCategory(Notification.CATEGORY_SERVICE)
+      .build()
+    startForeground(31529, n)
   }
+
+  private def createNotificationChannel: String = {
+    val channelId = "lexs-geotracking"
+    val channelName = "geotracking service"
+    val chan = new NotificationChannel(channelId, channelName, NotificationManager.IMPORTANCE_MIN)
+    chan.setLockscreenVisibility(Notification.VISIBILITY_PRIVATE)
+    val service = getSystemService(Context.NOTIFICATION_SERVICE).asInstanceOf[NotificationManager]
+    service.createNotificationChannel(chan)
+    channelId
+}
 
   onDestroy {
     info(s"stopping geo tracking service")
@@ -89,14 +114,14 @@ class GeoTrackingService extends SService with DatabaseImplicits
 
   private def checkMotion(): Unit = {
     info(s"checking device motion using lastLocationUpdateTime")
-    if(lastLocationUpdateTime > 0
-      && System.currentTimeMillis() - lastLocationUpdateTime > NoMotionInterval
-      && IsSignificantMotionDetectionAllowed
-    ) {
+    if (lastLocationUpdateTime > 0
+        && System
+          .currentTimeMillis() - lastLocationUpdateTime > NoMotionInterval
+        && IsSignificantMotionDetectionAllowed) {
       info("device is stopped")
       unregisterFromGpsUpdates()
       registerForMotionDetection()
-    } else if(IsSignificantMotionDetectionAllowed) {
+    } else if (IsSignificantMotionDetectionAllowed) {
       info("device is moving")
       handler.postDelayed(motionChecker, CheckMotionInterval)
     }
@@ -117,17 +142,21 @@ class GeoTrackingService extends SService with DatabaseImplicits
 
   private def registerForGpsUpdates(): Unit = {
     info("registering for gps updates")
-    val locationManager = getSystemService(Context.LOCATION_SERVICE).asInstanceOf[LocationManager]
+    val locationManager = getSystemService(Context.LOCATION_SERVICE)
+      .asInstanceOf[LocationManager]
     val c = new Criteria()
     c.setHorizontalAccuracy(Criteria.ACCURACY_FINE)
     val bestProvider = locationManager.getBestProvider(c, false)
 
-    if(bestProvider != LocationManager.GPS_PROVIDER) {
+    if (bestProvider != LocationManager.GPS_PROVIDER) {
       warn(s"bestProvider isn't gps: $bestProvider")
     }
 
     locationManager.requestLocationUpdates(
-      bestProvider, MinInterval, MinDistance, this
+      bestProvider,
+      MinInterval,
+      MinDistance,
+      this
     )
     startMotionChecker()
   }
@@ -174,45 +203,53 @@ class GeoTrackingService extends SService with DatabaseImplicits
   }
 
   private def sendUnsentLocations(): Unit = {
-    if(!WifiOnly || isWifi) {
-      val projection = Array(LocationEntry._ID, LocationEntry.LocationColumnName)
-      val unsent = database.query(
-        LocationEntry.TableName,
-        projection,
-        null, //selection
-        null, //selection args
-        null, //group
-        null, //filter
-        null,  //order
-        MaxLocationsToSend.toString // limit
-      ).closeAfter(_.map { c =>
-        val id = c.getInt(c.getColumnIndexOrThrow(LocationEntry._ID))
-        val l = c.getString(
-          c.getColumnIndexOrThrow(LocationEntry.LocationColumnName)
-        ).parseJson.convertTo[api.Location]
+    if (!WifiOnly || isWifi) {
+      val projection =
+        Array(LocationEntry._ID, LocationEntry.LocationColumnName)
+      val unsent = database
+        .query(
+          LocationEntry.TableName,
+          projection,
+          null, //selection
+          null, //selection args
+          null, //group
+          null, //filter
+          null, //order
+          MaxLocationsToSend.toString // limit
+        )
+        .closeAfter(_.map { c =>
+          val id = c.getInt(c.getColumnIndexOrThrow(LocationEntry._ID))
+          val l = c
+            .getString(
+              c.getColumnIndexOrThrow(LocationEntry.LocationColumnName)
+            )
+            .parseJson
+            .convertTo[api.Location]
 
-        LocationEntry(id, l)
-      })
+          LocationEntry(id, l)
+        })
 
-      if(unsent.nonEmpty) {
-        Api.sendLocation(unsent.map(_.location).toSeq) onSuccess { case response =>
-          runOnUiThread {
-            if(database.isOpen) { //service could be already stopped
-              val inClause = unsent.map(_ => "?").
-                mkString(LocationEntry._ID + " in (", ",", ")")
+      if (unsent.nonEmpty) {
+        Api.sendLocation(unsent.map(_.location).toSeq) onSuccess {
+          case response =>
+            runOnUiThread {
+              if (database.isOpen) { //service could be already stopped
+                val inClause = unsent
+                  .map(_ => "?")
+                  .mkString(LocationEntry._ID + " in (", ",", ")")
 
-              info(s"${unsent.size} unsent locations were sent")
-              database.delete(
-                LocationEntry.TableName,
-                inClause,
-                unsent.map(_.id.toString).toArray
-              )
-              if (unsent.size == MaxLocationsToSend) {
-                //we have more unsent in database
-                sendUnsentLocations()
+                info(s"${unsent.size} unsent locations were sent")
+                database.delete(
+                  LocationEntry.TableName,
+                  inClause,
+                  unsent.map(_.id.toString).toArray
+                )
+                if (unsent.size == MaxLocationsToSend) {
+                  //we have more unsent in database
+                  sendUnsentLocations()
+                }
               }
             }
-          }
         }
       }
     }
@@ -229,9 +266,11 @@ class GeoTrackingService extends SService with DatabaseImplicits
   // Location listener interface
   //
 
-  override def onProviderEnabled(provider: String): Unit = { }
-  override def onStatusChanged(provider: String, status: Int, extras: Bundle): Unit = { }
-  override def onProviderDisabled(provider: String): Unit = { }
+  override def onProviderEnabled(provider: String): Unit = {}
+  override def onStatusChanged(provider: String,
+                               status: Int,
+                               extras: Bundle): Unit = {}
+  override def onProviderDisabled(provider: String): Unit = {}
 
   override def onLocationChanged(location: Location): Unit = {
     debug(s"got new location with accuracy: ${location.getAccuracy} ")
@@ -244,7 +283,7 @@ class GeoTrackingService extends SService with DatabaseImplicits
       verticalAccuracy = None,
       speed = location.getSpeed
     )
-    if(locations.lengthCompare(MinLocationsToSend) == 0) {
+    if (locations.lengthCompare(MinLocationsToSend) == 0) {
       flushLocationsBatch()
     }
     lastLocationUpdateTime = System.currentTimeMillis()

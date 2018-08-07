@@ -30,9 +30,13 @@ proguardOptions in Android ++= Seq(
   "-dontwarn org.scaloid.**" // this can be omitted if current Android Build target is android-16
 )
 
+resolvers ++= Seq(
+  "Google repo" at "https://maven.google.com"
+)
+
 libraryDependencies ++= Seq(
   "org.scaloid"          %% "scaloid"            % "4.2",
-  "com.android.support"  %  "support-core-utils" % "24.2.0",
+  "com.android.support"  %  "support-core-utils" % "27.1.1",
   "com.squareup.okhttp3" %  "okhttp"             % "3.11.0",
   "io.spray"             %% "spray-json"         % "1.3.4"
 )

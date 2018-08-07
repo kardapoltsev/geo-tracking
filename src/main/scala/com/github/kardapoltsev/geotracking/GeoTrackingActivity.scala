@@ -46,7 +46,8 @@ class GeoTrackingActivity extends SActivity {
   }
 
   private def startTracking(): Unit = {
-    startService[GeoTrackingService]
+    startForegroundService(SIntent[GeoTrackingService])
+//    startService[GeoTrackingService]
   }
 
   private def stopTracking(): Unit = {
